@@ -10,7 +10,13 @@ import urllib.parse
 
 # =============== Load NLP + LLM =================
 print("Loading spaCy...")
-nlp = spacy.load("en_core_web_sm")
+try:
+    nlp = spacy.load("en_core_web_sm")
+except OSError:
+    # Download if not present
+    from spacy.cli import download
+    download("en_core_web_sm")
+    nlp = spacy.load("en_core_web_sm")
 
 print("Loading FLAN-T5...")
 device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
