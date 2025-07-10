@@ -20,7 +20,7 @@ except OSError:
 
 print("Loading FLAN-T5...")
 device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
-model_name = "google/flan-t5-small"
+model_name = "google/flan-t5-large"
 tokenizer = AutoTokenizer.from_pretrained(model_name)
 model = AutoModelForSeq2SeqLM.from_pretrained(model_name).to(device)
 
