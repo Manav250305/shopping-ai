@@ -566,12 +566,152 @@ def transcribe_audio():
     
     file = request.files["file"]
     
-    from tempfile import NamedTemporaryFile
-    with NamedTemporaryFile(delete=True, suffix=".wav") as tmp:
-        file.save(tmp.name)
-        transcription = asr_pipeline(tmp.name)["text"]
+    if file.filename == "":
+        return jsonify({"error": "No file selected"}), 400
     
-    return jsonify({"transcription": transcription})
+    try:
+        # Check if required libraries are available
+        try:
+            import librosa
+            import numpy as np
+            from tempfile import NamedTemporaryFile
+            import os
+        except ImportError as e:
+            return jsonify({
+                "error": f"Missing required library: {str(e)}",
+                "suggestions": [
+                    "Install librosa: pip install librosa",
+                    "Install numpy: pip install numpy",
+                    "Or try: pip install librosa numpy soundfile"
+                ]
+            }), 500
+        
+        # Save uploaded file temporarily
+        with NamedTemporaryFile(delete=False, suffix=".wav") as tmp:
+            file.save(tmp.name)
+            tmp_path = tmp.name
+        
+        try:
+            print(f"Processing audio file: {tmp_path}")
+            
+            # Load audio with librosa
+            try:
+                audio, sr = librosa.load(tmp_path, sr=16000)  # Whisper expects 16kHz
+                print(f"Audio loaded successfully - Duration: {len(audio)/sr:.2f}s, Sample rate: {sr}")
+            except Exception as e:
+                return jsonify({
+                    "error": f"Failed to load audio file: {str(e)}",
+                    "suggestions": [
+                        "Try a different audio format (WAV, MP3, M4A)",
+                        "Check if the audio file is not corrupted",
+                        "Ensure the file is not too large (< 25MB recommended)"
+                    ]
+                }), 400
+            
+            # Check audio duration
+            duration = len(audio) / sr
+            if duration < 0.1:
+                return jsonify({
+                    "error": "Audio is too short (< 0.1 seconds)",
+                    "suggestions": [
+                        "Record for at least 1-2 seconds",
+                        "Check if the audio file contains actual sound"
+                    ]
+                }), 400
+            
+            if duration > 30:  # 30 second limit for this demo
+                return jsonify({
+                    "error": "Audio is too long (> 30 seconds)",
+                    "suggestions": [
+                        "Split the audio into shorter segments",
+                        "Use a shorter recording"
+                    ]
+                }), 400
+            
+            # Convert to the format expected by the pipeline
+            try:
+                print("Starting transcription...")
+                result = asr_pipeline(audio)
+                transcription = result["text"]
+                print(f"Transcription completed: {transcription}")
+                
+                # Return successful response
+                return jsonify({
+                    "transcription": transcription,
+                    "audio_length": duration,
+                    "confidence": "N/A",  # Whisper doesn't provide confidence scores directly
+                    "success": True
+                })
+                
+            except Exception as e:
+                print(f"Transcription error: {str(e)}")
+                return jsonify({
+                    "error": f"Transcription failed: {str(e)}",
+                    "suggestions": [
+                        "Try speaking more clearly",
+                        "Ensure good audio quality",
+                        "Check if the audio contains speech",
+                        "Try recording in a quieter environment"
+                    ]
+                }), 500
+                
+        finally:
+            # Clean up temporary file
+            try:
+                os.unlink(tmp_path)
+                print(f"Temporary file cleaned up: {tmp_path}")
+            except Exception as e:
+                print(f"Warning: Could not clean up temp file: {e}")
+                
+    except Exception as e:
+        print(f"Unexpected error in transcription: {str(e)}")
+        return jsonify({
+            "error": f"Unexpected error: {str(e)}",
+            "suggestions": [
+                "Check server logs for more details",
+                "Try restarting the Flask application",
+                "Ensure all dependencies are installed"
+            ]
+        }), 500
+
+# Add a test endpoint to check if everything is working
+@app.route("/transcribe/test", methods=["GET"])
+def test_transcription():
+    """Test endpoint to verify transcription setup"""
+    try:
+        import librosa
+        import numpy as np
+        
+        # Test if the ASR pipeline is working
+        test_audio = np.random.randn(16000)  # 1 second of random noise
+        result = asr_pipeline(test_audio)
+        
+        return jsonify({
+            "status": "healthy",
+            "librosa_version": librosa.__version__,
+            "numpy_version": np.__version__,
+            "asr_pipeline_working": True,
+            "test_transcription": result["text"]
+        })
+        
+    except ImportError as e:
+        return jsonify({
+            "status": "error",
+            "error": f"Missing library: {str(e)}",
+            "suggestions": [
+                "Install missing dependencies",
+                "Run: pip install librosa numpy soundfile"
+            ]
+        }), 500
+    except Exception as e:
+        return jsonify({
+            "status": "error",
+            "error": f"ASR pipeline error: {str(e)}",
+            "suggestions": [
+                "Check Whisper model installation",
+                "Try restarting the application"
+            ]
+        }), 500
 
 @app.route("/reset", methods=["POST"])
 def reset_session():
