@@ -1,4 +1,5 @@
 from flask import Flask, request, jsonify
+from flask_cors import CORS
 import spacy
 from transformers import AutoTokenizer, AutoModelForSeq2SeqLM, pipeline
 import torch
@@ -23,6 +24,9 @@ device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
 model_name = "google/flan-t5-large"
 tokenizer = AutoTokenizer.from_pretrained(model_name)
 model = AutoModelForSeq2SeqLM.from_pretrained(model_name).to(device)
+
+print("Loading Whisper ASR...")
+asr_pipeline = pipeline("automatic-speech-recognition", model="openai/whisper-small")
 
 # =============== Enhanced Product Knowledge Base ================
 PRODUCT_CATEGORIES = {
@@ -499,6 +503,7 @@ def build_search_urls(combined_context):
 
 # =============== Flask App ================
 app = Flask(__name__)
+CORS(app)
 
 @app.route("/", methods=["GET"])
 def index():
@@ -552,7 +557,21 @@ def chat():
         
     except Exception as e:
         print(f"Error in chat endpoint: {e}")
-        return jsonify({"error": f"Processing error: {str(e)}"}), 500
+        return jsonify({"error": f"Processing error: {str(e)}"}), 400
+    
+@app.route("/transcribe", methods=["POST"])
+def transcribe_audio():
+    if "file" not in request.files:
+        return jsonify({"error": "No audio file uploaded"}), 400
+    
+    file = request.files["file"]
+    
+    from tempfile import NamedTemporaryFile
+    with NamedTemporaryFile(delete=True, suffix=".wav") as tmp:
+        file.save(tmp.name)
+        transcription = asr_pipeline(tmp.name)["text"]
+    
+    return jsonify({"transcription": transcription})
 
 @app.route("/reset", methods=["POST"])
 def reset_session():
